@@ -8,45 +8,49 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
-    // Register service worker for PWA
+    // Register Service Worker
     if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            // Create a proper service worker
-            const swCode = `
-                self.addEventListener('install', (e) => { 
-                    self.skipWaiting(); 
-                    console.log('Service Worker installed');
-                }); 
-                
-                self.addEventListener('activate', (e) => {
-                    e.waitUntil(self.clients.claim());
-                    console.log('Service Worker activated');
-                });
-                
-                self.addEventListener('fetch', (e) => { 
-                    // Only handle same-origin requests
-                    if (e.request.url.startsWith(self.location.origin)) {
-                        e.respondWith(
-                            fetch(e.request).catch(() => {
-                                // Fallback for offline
-                                return new Response('App offline', { 
-                                    status: 200, 
-                                    headers: { 'Content-Type': 'text/plain' } 
-                                });
-                            })
-                        );
-                    }
-                });
-            `;
-            
-            const blob = new Blob([swCode], { type: 'application/javascript' });
-            const swUrl = URL.createObjectURL(blob);
-            
-            navigator.serviceWorker.register(swUrl)
-                .then(() => console.log('Service Worker registered successfully'))
-                .catch((error) => console.log('Service Worker registration failed:', error));
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+            console.log('SW registered: ', registration);
+        })
+        .catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+        });
+    });
+    }
+
+    // PWA Install Prompt (optional)
+    let deferredPrompt;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later
+    deferredPrompt = e;
+    
+    // Show install button (if you have one)
+    const installBtn = document.getElementById('install-btn');
+    if (installBtn) {
+        installBtn.style.display = 'block';
+        
+        installBtn.addEventListener('click', () => {
+        // Show the install prompt
+        deferredPrompt.prompt();
+        
+        // Wait for the user to respond to the prompt
+        deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the install prompt');
+            } else {
+            console.log('User dismissed the install prompt');
+            }
+            deferredPrompt = null;
+        });
         });
     }
+    });
 
     // Set default deadline to tomorrow
     const tomorrow = new Date();
@@ -67,6 +71,7 @@ function bindEvents() {
     // PDF buttons
     document.getElementById('generatePDF').addEventListener('click', generatePDF);
     document.getElementById('downloadPDF').addEventListener('click', downloadPDF);
+    document.getElementById('printPDF').addEventListener('click', printPDF);
     
     // Modal close
     document.getElementById('closeModal').addEventListener('click', closeModal);
@@ -425,8 +430,9 @@ async function generatePDF() {
         
         generatedPDF = pdf;
         
-        // Enable download button
+        // Enable download and print buttons
         document.getElementById('downloadPDF').disabled = false;
+        document.getElementById('printPDF').disabled = false;
         
         // Show success modal
         showSuccessModal();
@@ -442,6 +448,28 @@ function downloadPDF() {
         const namaTas = document.getElementById('namaTas').value.trim() || 'Order';
         const fileName = `Order_${namaTas.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`;
         generatedPDF.save(fileName);
+    }
+}
+
+function printPDF() {
+    if (generatedPDF) {
+        // Create a blob from the PDF
+        const pdfBlob = generatedPDF.output('blob');
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        
+        // Open in new window for printing
+        const printWindow = window.open(blobUrl);
+        
+        // Wait for PDF to load, then trigger print dialog
+        printWindow.onload = function() {
+            setTimeout(() => {
+                printWindow.print();
+                // Clean up the blob URL after printing
+                setTimeout(() => {
+                    URL.revokeObjectURL(blobUrl);
+                }, 1000);
+            }, 500);
+        };
     }
 }
 
@@ -485,6 +513,12 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         downloadPDF();
     }
+    
+    // Ctrl + P to print PDF
+    if (e.ctrlKey && e.key === 'p' && !document.getElementById('printPDF').disabled) {
+        e.preventDefault();
+        printPDF();
+    }
 });
 
 // Auto-save form data to prevent data loss
@@ -512,8 +546,9 @@ setInterval(autoSaveFormData, 30000);
 
 // Form change detection
 document.addEventListener('input', () => {
-    // Reset download button when form changes
+    // Reset download and print buttons when form changes
     document.getElementById('downloadPDF').disabled = true;
+    document.getElementById('printPDF').disabled = true;
     generatedPDF = null;
 });
 
