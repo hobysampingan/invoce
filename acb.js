@@ -1,0 +1,1023 @@
+// Global variables
+let uploadedImage = null;
+let generatedPDF = null;
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    initializeApp();
+});
+
+function initializeApp() {
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+            console.log('SW registered: ', registration);
+        })
+        .catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+        });
+    });
+    }
+
+    // PWA Install Prompt (optional)
+    let deferredPrompt;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later
+    deferredPrompt = e;
+    
+    // Show install button (if you have one)
+    const installBtn = document.getElementById('install-btn');
+    if (installBtn) {
+        installBtn.style.display = 'block';
+        
+        installBtn.addEventListener('click', () => {
+        // Show the install prompt
+        deferredPrompt.prompt();
+        
+        // Wait for the user to respond to the prompt
+        deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the install prompt');
+            } else {
+            console.log('User dismissed the install prompt');
+            }
+            deferredPrompt = null;
+        });
+        });
+    }
+    });
+
+    // Set default deadline to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    document.getElementById('deadline').value = tomorrow.toISOString().split('T')[0];
+
+    // Bind event listeners
+    bindEvents();
+
+    // Tambahkan di fungsi initializeApp()
+    document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('color-name') && 
+            !e.target.classList.contains('color-qty') &&
+            !e.target.classList.contains('accessory-name') && 
+            !e.target.classList.contains('accessory-multiplier')) {
+            // Jika klik di luar input, hilangkan fokus
+            if (document.activeElement.classList.contains('color-name') || 
+                document.activeElement.classList.contains('color-qty') ||
+                document.activeElement.classList.contains('accessory-name') || 
+                document.activeElement.classList.contains('accessory-multiplier')) {
+                document.activeElement.blur();
+            }
+        }
+    });
+}
+
+// Jika perlu membersihkan event listener
+function cleanup() {
+    document.removeEventListener('keydown', handleColorInputEnter);
+    document.removeEventListener('keydown', handleAccessoryInputEnter);
+}
+
+function bindEvents() {
+    // Add color button
+    document.getElementById('addColor').addEventListener('click', addColorRow);
+    
+    // Add accessory button
+    document.getElementById('addAccessory').addEventListener('click', addAccessoryRow);
+    
+    // Image upload
+    document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
+    
+    // PDF buttons
+    document.getElementById('generatePDF').addEventListener('click', generatePDF);
+    document.getElementById('downloadPDF').addEventListener('click', downloadPDF);
+    document.getElementById('printPDF').addEventListener('click', printPDF);
+    
+    // Clear form button
+    document.getElementById('clearForm').addEventListener('click', clearForm);
+    
+    // Modal close
+    document.getElementById('closeModal').addEventListener('click', closeModal);
+    
+    // Initial remove buttons
+    bindRemoveColorButtons();
+    bindRemoveAccessoryButtons();
+
+    // Add Enter key behavior for inputs
+    document.addEventListener('keydown', handleColorInputEnter);
+    document.addEventListener('keydown', handleAccessoryInputEnter);
+}
+
+// Tambahkan fungsi baru untuk menangani Enter pada color inputs
+function handleColorInputEnter(e) {
+    if (e.key === 'Enter') {
+        const activeElement = document.activeElement;
+        
+        // Jika Enter ditekan di input nama warna
+        if (activeElement.classList.contains('color-name')) {
+            e.preventDefault();
+            const qtyInput = activeElement.closest('.color-row').querySelector('.color-qty');
+            qtyInput.focus();
+        } 
+        // Jika Enter ditekan di input jumlah
+        else if (activeElement.classList.contains('color-qty')) {
+            e.preventDefault();
+            // Cek jika input jumlah memiliki nilai
+            if (activeElement.value) {
+                addColorRow();
+                const newRow = document.querySelector('.color-row:last-child');
+                const newNameInput = newRow.querySelector('.color-name');
+                newNameInput.focus();
+            }
+        }
+    }
+}
+
+// Fungsi untuk menangani Enter pada accessory inputs
+function handleAccessoryInputEnter(e) {
+    if (e.key === 'Enter') {
+        const activeElement = document.activeElement;
+        
+        // Jika Enter ditekan di input nama accessory
+        if (activeElement.classList.contains('accessory-name')) {
+            e.preventDefault();
+            const multiplierInput = activeElement.closest('.accessory-row').querySelector('.accessory-multiplier');
+            multiplierInput.focus();
+        } 
+        // Jika Enter ditekan di input multiplier
+        else if (activeElement.classList.contains('accessory-multiplier')) {
+            e.preventDefault();
+            // Cek jika input multiplier memiliki nilai
+            if (activeElement.value) {
+                addAccessoryRow();
+                const newRow = document.querySelector('.accessory-row:last-child');
+                const newNameInput = newRow.querySelector('.accessory-name');
+                newNameInput.focus();
+            }
+        }
+    }
+}
+
+function addColorRow() {
+    const container = document.getElementById('colorContainer');
+    const colorRow = document.createElement('div');
+    colorRow.className = 'color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg';
+    colorRow.innerHTML = `
+        <div class="flex-1">
+            <input type="text" placeholder="Nama warna" 
+                   class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+        </div>
+        <div class="w-32">
+            <input type="number" placeholder="Jumlah" min="1" 
+                   class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+        </div>
+        <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    container.appendChild(colorRow);
+    bindRemoveColorButtons();
+    
+    // Fokus ke input nama warna di row baru
+    const nameInput = colorRow.querySelector('.color-name');
+    nameInput.focus();
+}
+
+function addAccessoryRow() {
+    const container = document.getElementById('accessoryContainer');
+    const accessoryRow = document.createElement('div');
+    accessoryRow.className = 'accessory-row flex items-center space-x-3 p-4 bg-purple-50 rounded-lg';
+    accessoryRow.innerHTML = `
+        <div class="flex-1">
+            <input type="text" placeholder="Nama accessory (contoh: Ring kotak)" 
+                   class="accessory-name w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+        </div>
+        <div class="w-32">
+            <input type="number" placeholder="Multiplier" min="1" 
+                   class="accessory-multiplier w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+        </div>
+        <button type="button" class="remove-accessory text-red-500 hover:text-red-700 p-2">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    container.appendChild(accessoryRow);
+    bindRemoveAccessoryButtons();
+    
+    // Fokus ke input nama accessory di row baru
+    const nameInput = accessoryRow.querySelector('.accessory-name');
+    nameInput.focus();
+}
+
+function bindRemoveColorButtons() {
+    document.querySelectorAll('.remove-color').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (document.querySelectorAll('.color-row').length > 1) {
+                this.closest('.color-row').remove();
+            } else {
+                alert('Minimal harus ada 1 warna');
+            }
+        });
+    });
+}
+
+function bindRemoveAccessoryButtons() {
+    document.querySelectorAll('.remove-accessory').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (document.querySelectorAll('.accessory-row').length > 1) {
+                this.closest('.accessory-row').remove();
+            } else {
+                // Allow removing all accessories (accessories are optional)
+                this.closest('.accessory-row').remove();
+                
+                // If no accessories left, add an empty one
+                if (document.querySelectorAll('.accessory-row').length === 0) {
+                    addAccessoryRow();
+                }
+            }
+        });
+    });
+}
+
+function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+            alert('File terlalu besar. Maksimal 10MB');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            // Process image to fix orientation and create thumbnail
+            processImageForPDF(e.target.result);
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function processImageForPDF(imageSrc) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = function() {
+        // Set canvas size to square thumbnail
+        const size = 300; // Higher resolution for better quality
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Calculate dimensions to fit image in square while maintaining aspect ratio
+        let sourceX = 0, sourceY = 0, sourceWidth = img.width, sourceHeight = img.height;
+        
+        if (img.width > img.height) {
+            // Landscape - crop from center horizontally
+            sourceX = (img.width - img.height) / 2;
+            sourceWidth = img.height;
+        } else if (img.height > img.width) {
+            // Portrait - crop from center vertically
+            sourceY = (img.height - img.width) / 2;
+            sourceHeight = img.width;
+        }
+        
+        // Fill with white background first
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        
+        // Draw image centered and cropped to square
+        ctx.drawImage(
+            img,
+            sourceX, sourceY, sourceWidth, sourceHeight, // source
+            0, 0, size, size // destination
+        );
+        
+        // Convert back to data URL with high quality
+        uploadedImage = canvas.toDataURL('image/jpeg', 0.9);
+        
+        // Update preview
+        document.getElementById('imagePreview').classList.remove('hidden');
+        document.getElementById('previewImg').src = uploadedImage;
+    };
+    
+    img.onerror = function() {
+        alert('Gagal memproses gambar. Silakan coba gambar lain.');
+    };
+    
+    img.src = imageSrc;
+}
+
+function validateForm() {
+    const deadline = document.getElementById('deadline').value;
+    const namaTas = document.getElementById('namaTas').value.trim();
+    const colorRows = document.querySelectorAll('.color-row');
+    
+    if (!deadline) {
+        alert('Tanggal deadline harus diisi');
+        return false;
+    }
+    
+    if (!namaTas) {
+        alert('Nama tas harus diisi');
+        return false;
+    }
+    
+    let hasValidColor = false;
+    colorRows.forEach(row => {
+        const colorName = row.querySelector('.color-name').value.trim();
+        const colorQty = row.querySelector('.color-qty').value;
+        if (colorName && colorQty && parseInt(colorQty) > 0) {
+            hasValidColor = true;
+        }
+    });
+    
+    if (!hasValidColor) {
+        alert('Minimal harus ada 1 warna dengan jumlah yang valid');
+        return false;
+    }
+    
+    return true;
+}
+
+function getFormData() {
+    const deadline = document.getElementById('deadline').value;
+    const namaTas = document.getElementById('namaTas').value.trim();
+    const orderNotes = document.getElementById('orderNotes').value.trim();
+    const colorRows = document.querySelectorAll('.color-row');
+    const accessoryRows = document.querySelectorAll('.accessory-row');
+    
+    const colors = [];
+    const accessories = [];
+    let totalQty = 0;
+    
+    // Process colors
+    colorRows.forEach(row => {
+        const colorName = row.querySelector('.color-name').value.trim();
+        const colorQty = parseInt(row.querySelector('.color-qty').value) || 0;
+        
+        if (colorName && colorQty > 0) {
+            colors.push({ name: colorName, qty: colorQty });
+            totalQty += colorQty;
+        }
+    });
+    
+    // Process accessories
+    accessoryRows.forEach(row => {
+        const accessoryName = row.querySelector('.accessory-name').value.trim();
+        const accessoryMultiplier = parseInt(row.querySelector('.accessory-multiplier').value) || 0;
+        
+        if (accessoryName && accessoryMultiplier > 0) {
+            const totalNeeded = totalQty * accessoryMultiplier;
+            accessories.push({ 
+                name: accessoryName, 
+                multiplier: accessoryMultiplier,
+                totalNeeded: totalNeeded
+            });
+        }
+    });
+    
+    return {
+        deadline: new Date(deadline).toLocaleDateString('id-ID', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        }),
+        namaTas: namaTas,
+        colors: colors,
+        accessories: accessories,
+        totalQty: totalQty,
+        image: uploadedImage,
+        notes: orderNotes
+    };
+}
+
+function generatePDFPreview(data) {
+    const previewContent = document.getElementById('pdfContent');
+    let colorsHTML = '';
+    let accessoriesHTML = '';
+    
+    // Generate colors HTML
+    data.colors.forEach(color => {
+        colorsHTML += `
+            <div class="flex justify-between items-center py-2 border-b border-gray-100">
+                <span class="text-gray-700">${color.name}</span>
+                <span class="font-medium">${color.qty} pcs</span>
+            </div>
+        `;
+    });
+    
+    // Generate accessories HTML
+    if (data.accessories.length > 0) {
+        data.accessories.forEach(accessory => {
+            accessoriesHTML += `
+                <div class="flex justify-between items-center py-2 border-b border-purple-100">
+                    <div class="flex-1">
+                        <span class="text-gray-700">${accessory.name}</span>
+                        <span class="text-purple-600 text-sm block">×${accessory.multiplier} per tas</span>
+                    </div>
+                    <span class="font-medium text-purple-700">${accessory.totalNeeded} pcs</span>
+                </div>
+            `;
+        });
+    }
+    
+    // Create thumbnail layout for preview
+    const orderInfoHTML = data.image ? 
+        `<div class="flex items-start gap-6 mb-6">
+            <div class="flex-1">
+                <div class="mb-4">
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Nama Produk</h3>
+                    <p class="text-lg font-semibold text-gray-900">${data.namaTas}</p>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Deadline</h3>
+                    <p class="text-lg font-semibold text-gray-900">${data.deadline}</p>
+                </div>
+            </div>
+            <div class="flex-shrink-0">
+                <img src="${data.image}" alt="Gambar Tas" class="w-20 h-20 object-cover rounded-lg border border-gray-200 shadow-sm">
+            </div>
+        </div>` : 
+        `<div class="grid grid-cols-2 gap-6 mb-6">
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Nama Produk</h3>
+                <p class="text-lg font-semibold text-gray-900">${data.namaTas}</p>
+            </div>
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Deadline</h3>
+                <p class="text-lg font-semibold text-gray-900">${data.deadline}</p>
+            </div>
+        </div>`;
+    
+    // Add accessories section HTML
+    const accessoriesSection = data.accessories.length > 0 ? 
+        `<div class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Accessories</h3>
+            <div class="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                <div class="space-y-1">
+                    ${accessoriesHTML}
+                </div>
+            </div>
+        </div>` : '';
+    
+    // Add notes section HTML
+    const notesHTML = data.notes ? 
+        `<div class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Catatan</h3>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p class="text-gray-700 whitespace-pre-line">${data.notes}</p>
+            </div>
+        </div>` : '';
+    
+    previewContent.innerHTML = `
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">ORDER CONFIRMATION</h1>
+            <div class="w-16 h-1 bg-gray-800 mx-auto"></div>
+        </div>
+        
+        <!-- Order Info with Thumbnail -->
+        <div class="mb-8">
+            ${orderInfoHTML}
+        </div>
+        
+        <!-- Colors Table -->
+        <div class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Warna & Jumlah</h3>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <div class="space-y-1">
+                    ${colorsHTML}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Accessories Section -->
+        ${accessoriesSection}
+        
+        <!-- Notes Section -->
+        ${notesHTML}
+        
+        <!-- Total -->
+        <div class="mt-8 pt-6 border-t-2 border-gray-800">
+            <div class="flex justify-between items-center">
+                <span class="text-xl font-semibold text-gray-900">Total Tas:</span>
+                <span class="text-2xl font-bold text-gray-900">${data.totalQty} pcs</span>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="mt-8 pt-6 border-t border-gray-200 text-center">
+            <p class="text-sm text-gray-500">Generated on ${new Date().toLocaleDateString('id-ID')}</p>
+        </div>
+    `;
+    
+    document.getElementById('pdfPreview').classList.remove('hidden');
+    document.getElementById('pdfPreview').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function generatePDF() {
+    if (!validateForm()) return;
+    
+    const data = getFormData();
+    generatePDFPreview(data);
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF();
+        
+        // Set font
+        pdf.setFont('helvetica');
+        
+        let yPosition = 30;
+        
+        // Header
+        pdf.setFontSize(20);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('ORDER CONFIRMATION', 105, yPosition, { align: 'center' });
+        
+        // Line under header
+        pdf.setLineWidth(2);
+        pdf.line(20, yPosition + 5, 190, yPosition + 5);
+        
+        yPosition += 25;
+        
+        // Order Info with thumbnail image
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'bold');
+        
+        // Add thumbnail image first if exists (positioned on the right)
+        let thumbnailAdded = false;
+        if (data.image) {
+            try {
+                const thumbnailSize = 30; // Slightly smaller for better fit
+                const thumbnailX = 155; // Adjusted position
+                const thumbnailY = yPosition - 2;
+                
+                // Add image with proper format specification
+                pdf.addImage(data.image, 'JPEG', thumbnailX, thumbnailY, thumbnailSize, thumbnailSize);
+                thumbnailAdded = true;
+            } catch (error) {
+                console.warn('Could not add thumbnail to PDF:', error);
+            }
+        }
+        
+        // Product info (left side)
+        pdf.text('NAMA PRODUK:', 20, yPosition);
+        pdf.setFont('helvetica', 'normal');
+        // Limit text width if thumbnail is present
+        const maxTextWidth = thumbnailAdded ? 120 : 170;
+        const splitNama = pdf.splitTextToSize(data.namaTas, maxTextWidth - 50);
+        pdf.text(splitNama, 70, yPosition);
+        
+        // Adjust yPosition based on text height
+        const textHeight = splitNama.length * 5;
+        yPosition += Math.max(10, textHeight);
+        
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('DEADLINE:', 20, yPosition);
+        pdf.setFont('helvetica', 'normal');
+        const splitDeadline = pdf.splitTextToSize(data.deadline, maxTextWidth - 50);
+        pdf.text(splitDeadline, 70, yPosition);
+        
+        // Ensure we move past the thumbnail area
+        if (thumbnailAdded) {
+            yPosition = Math.max(yPosition + 10, yPosition - 15 + 35 + 10);
+        } else {
+            yPosition += 15;
+        }
+        
+        yPosition += 10;
+        
+        // Colors section
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('DETAIL WARNA & JUMLAH:', 20, yPosition);
+        yPosition += 10;
+        
+        // Tentukan posisi kolom untuk warna
+        const leftColumnX = 25;
+        const rightColumnX = 110;
+        const centerLineX = 95;
+        const itemsPerColumn = Math.ceil(data.colors.length / 2);
+
+        // Gambar garis vertikal di tengah untuk warna
+        pdf.setDrawColor(0, 0, 0);
+        pdf.setLineWidth(0.5);
+        pdf.line(centerLineX, yPosition - 5, centerLineX, yPosition + (itemsPerColumn * 8) + 5);
+
+        // Reset posisi Y untuk kedua kolom warna
+        let leftYPosition = yPosition;
+        let rightYPosition = yPosition;
+
+        data.colors.forEach((color, index) => {
+            if (index < itemsPerColumn) {
+                // Kolom kiri
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(`• ${color.name}`, leftColumnX, leftYPosition);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(`${color.qty} pcs`, leftColumnX + 50, leftYPosition);
+                leftYPosition += 8;
+            } else {
+                // Kolom kanan
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(`• ${color.name}`, rightColumnX, rightYPosition);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(`${color.qty} pcs`, rightColumnX + 50, rightYPosition);
+                rightYPosition += 8;
+            }
+        });
+
+        // Update yPosition untuk konten selanjutnya
+        yPosition = Math.max(leftYPosition, rightYPosition) + 15;
+        
+        // Accessories section
+        if (data.accessories.length > 0) {
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('DETAIL ACCESSORIES:', 20, yPosition);
+            yPosition += 10;
+            
+            // Tentukan posisi kolom untuk accessories
+            const leftColumnX = 25;
+            const rightColumnX = 110;
+            const centerLineX = 95;
+            const itemsPerColumn = Math.ceil(data.accessories.length / 2);
+
+            // Gambar garis vertikal di tengah untuk accessories
+            pdf.setDrawColor(0, 0, 0);
+            pdf.setLineWidth(0.5);
+            pdf.line(centerLineX, yPosition - 5, centerLineX, yPosition + (itemsPerColumn * 12) + 5);
+
+            // Reset posisi Y untuk kedua kolom accessories
+            let leftYPosition = yPosition;
+            let rightYPosition = yPosition;
+
+            data.accessories.forEach((accessory, index) => {
+                if (index < itemsPerColumn) {
+                    // Kolom kiri
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text(`• ${accessory.name}`, leftColumnX, leftYPosition);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`x${accessory.multiplier} per tas = ${accessory.totalNeeded} pcs`, leftColumnX, leftYPosition + 5);
+                    leftYPosition += 12;
+                } else {
+                    // Kolom kanan
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text(`• ${accessory.name}`, rightColumnX, rightYPosition);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`x${accessory.multiplier} per tas = ${accessory.totalNeeded} pcs`, rightColumnX, rightYPosition + 5);
+                    rightYPosition += 12;
+                }
+            });
+
+            // Update yPosition untuk konten selanjutnya
+            yPosition = Math.max(leftYPosition, rightYPosition) + 5;
+        }
+        
+        // Add notes section if exists
+        if (data.notes) {
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('CATATAN:', 20, yPosition);
+            yPosition += 10;
+            
+            pdf.setFont('helvetica', 'normal');
+            // Split notes text to fit within page width
+            const splitNotes = pdf.splitTextToSize(data.notes, 170);
+            pdf.text(splitNotes, 20, yPosition);
+            yPosition += splitNotes.length * 5 + 10;
+        }
+        
+        yPosition += 5;
+        
+        // Total
+        pdf.setLineWidth(1);
+        pdf.line(20, yPosition, 190, yPosition);
+        yPosition += 15;
+        
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('TOTAL TAS:', 20, yPosition);
+        pdf.text(`${data.totalQty} pcs`, 150, yPosition);
+        
+        // Footer
+        yPosition += 20;
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(`Generated on ${new Date().toLocaleDateString('id-ID')}`, 105, yPosition, { align: 'center' });
+        
+        generatedPDF = pdf;
+        
+        // Enable download and print buttons
+        document.getElementById('downloadPDF').disabled = false;
+        document.getElementById('printPDF').disabled = false;
+        
+        // Show success modal
+        showSuccessModal();
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('Terjadi kesalahan saat membuat PDF. Silakan coba lagi.');
+    }
+}
+
+function clearForm() {
+    // Konfirmasi sebelum clear
+    if (confirm('Apakah Anda yakin ingin menghapus semua data dan memulai dari awal?')) {
+        // Reset form fields
+        document.getElementById('deadline').value = '';
+        document.getElementById('namaTas').value = '';
+        document.getElementById('orderNotes').value = '';
+        
+        // Set default deadline to tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        document.getElementById('deadline').value = tomorrow.toISOString().split('T')[0];
+        
+        // Reset image
+        document.getElementById('imageUpload').value = '';
+        document.getElementById('imagePreview').classList.add('hidden');
+        uploadedImage = null;
+        
+        // Reset color rows - keep only one empty row
+        const colorContainer = document.getElementById('colorContainer');
+        colorContainer.innerHTML = `
+            <div class="color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
+                <div class="flex-1">
+                    <input type="text" placeholder="Nama warna" 
+                           class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                </div>
+                <div class="w-32">
+                    <input type="number" placeholder="Jumlah" min="1" 
+                           class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                </div>
+                <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        // Reset accessory rows - keep only one empty row
+        const accessoryContainer = document.getElementById('accessoryContainer');
+        accessoryContainer.innerHTML = `
+            <div class="accessory-row flex items-center space-x-3 p-4 bg-purple-50 rounded-lg">
+                <div class="flex-1">
+                    <input type="text" placeholder="Nama accessory (contoh: Ring kotak)" 
+                           class="accessory-name w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                </div>
+                <div class="w-32">
+                    <input type="number" placeholder="Multiplier" min="1" 
+                           class="accessory-multiplier w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                </div>
+                <button type="button" class="remove-accessory text-red-500 hover:text-red-700 p-2">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        // Rebind event listeners
+        bindRemoveColorButtons();
+        bindRemoveAccessoryButtons();
+        
+        // Hide PDF preview
+        document.getElementById('pdfPreview').classList.add('hidden');
+        
+        // Disable PDF buttons
+        document.getElementById('downloadPDF').disabled = true;
+        document.getElementById('printPDF').disabled = true;
+        
+        // Reset PDF
+        generatedPDF = null;
+        
+        // Focus on nama tas field
+        document.getElementById('namaTas').focus();
+    }
+}
+
+function downloadPDF() {
+    if (generatedPDF) {
+        const namaTas = document.getElementById('namaTas').value.trim();
+        const deadline = document.getElementById('deadline').value;
+        const fileName = `Order_${namaTas.replace(/\s+/g, '_')}_${deadline}.pdf`;
+        generatedPDF.save(fileName);
+    }
+}
+
+function printPDF() {
+    if (generatedPDF) {
+        generatedPDF.autoPrint();
+        const pdfBlob = generatedPDF.output('blob');
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const printWindow = window.open(pdfUrl);
+        
+        // Clean up the URL after printing
+        printWindow.addEventListener('afterprint', () => {
+            URL.revokeObjectURL(pdfUrl);
+            printWindow.close();
+        });
+    }
+}
+
+function showSuccessModal() {
+    document.getElementById('successModal').classList.remove('hidden');
+    document.getElementById('successModal').classList.add('flex');
+}
+
+function closeModal() {
+    document.getElementById('successModal').classList.add('hidden');
+    document.getElementById('successModal').classList.remove('flex');
+}
+
+// Additional utility functions
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+    }).format(amount);
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('id-ID', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+}
+
+// Error handling
+window.addEventListener('error', function(e) {
+    console.error('Global error:', e.error);
+    
+    // Show user-friendly error message for common issues
+    if (e.error && e.error.message) {
+        if (e.error.message.includes('jsPDF')) {
+            alert('Terjadi kesalahan saat membuat PDF. Silakan refresh halaman dan coba lagi.');
+        } else if (e.error.message.includes('image')) {
+            alert('Terjadi kesalahan saat memproses gambar. Silakan coba dengan gambar lain.');
+        }
+    }
+});
+
+// Prevent form submission on Enter key (except for specific cases)
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'button') {
+        // Only prevent default if it's not our handled cases
+        if (!e.target.classList.contains('color-name') && 
+            !e.target.classList.contains('color-qty') &&
+            !e.target.classList.contains('accessory-name') && 
+            !e.target.classList.contains('accessory-multiplier')) {
+            e.preventDefault();
+        }
+    }
+});
+
+// Auto-save functionality (optional - saves to localStorage if available)
+function autoSave() {
+    try {
+        if (typeof(Storage) !== "undefined") {
+            const formData = {
+                deadline: document.getElementById('deadline').value,
+                namaTas: document.getElementById('namaTas').value,
+                orderNotes: document.getElementById('orderNotes').value,
+                colors: [],
+                accessories: []
+            };
+            
+            // Save colors
+            document.querySelectorAll('.color-row').forEach(row => {
+                const name = row.querySelector('.color-name').value;
+                const qty = row.querySelector('.color-qty').value;
+                if (name || qty) {
+                    formData.colors.push({ name, qty });
+                }
+            });
+            
+            // Save accessories
+            document.querySelectorAll('.accessory-row').forEach(row => {
+                const name = row.querySelector('.accessory-name').value;
+                const multiplier = row.querySelector('.accessory-multiplier').value;
+                if (name || multiplier) {
+                    formData.accessories.push({ name, multiplier });
+                }
+            });
+            
+            localStorage.setItem('orderFormData', JSON.stringify(formData));
+        }
+    } catch (e) {
+        // Silently fail if localStorage is not available
+        console.warn('Auto-save failed:', e);
+    }
+}
+
+// Load saved data on page load
+function loadSavedData() {
+    try {
+        if (typeof(Storage) !== "undefined") {
+            const savedData = localStorage.getItem('orderFormData');
+            if (savedData) {
+                const data = JSON.parse(savedData);
+                
+                // Load basic fields
+                if (data.deadline) document.getElementById('deadline').value = data.deadline;
+                if (data.namaTas) document.getElementById('namaTas').value = data.namaTas;
+                if (data.orderNotes) document.getElementById('orderNotes').value = data.orderNotes;
+                
+                // Load colors
+                if (data.colors && data.colors.length > 0) {
+                    const colorContainer = document.getElementById('colorContainer');
+                    colorContainer.innerHTML = '';
+                    
+                    data.colors.forEach(color => {
+                        const colorRow = document.createElement('div');
+                        colorRow.className = 'color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg';
+                        colorRow.innerHTML = `
+                            <div class="flex-1">
+                                <input type="text" placeholder="Nama warna" value="${color.name || ''}"
+                                       class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                            </div>
+                            <div class="w-32">
+                                <input type="number" placeholder="Jumlah" min="1" value="${color.qty || ''}"
+                                       class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                            </div>
+                            <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        `;
+                        colorContainer.appendChild(colorRow);
+                    });
+                    
+                    bindRemoveColorButtons();
+                }
+                
+                // Load accessories
+                if (data.accessories && data.accessories.length > 0) {
+                    const accessoryContainer = document.getElementById('accessoryContainer');
+                    accessoryContainer.innerHTML = '';
+                    
+                    data.accessories.forEach(accessory => {
+                        const accessoryRow = document.createElement('div');
+                        accessoryRow.className = 'accessory-row flex items-center space-x-3 p-4 bg-purple-50 rounded-lg';
+                        accessoryRow.innerHTML = `
+                            <div class="flex-1">
+                                <input type="text" placeholder="Nama accessory (contoh: Ring kotak)" value="${accessory.name || ''}"
+                                       class="accessory-name w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                            </div>
+                            <div class="w-32">
+                                <input type="number" placeholder="Multiplier" min="1" value="${accessory.multiplier || ''}"
+                                       class="accessory-multiplier w-full px-3 py-2 border border-purple-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                            </div>
+                            <button type="button" class="remove-accessory text-red-500 hover:text-red-700 p-2">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        `;
+                        accessoryContainer.appendChild(accessoryRow);
+                    });
+                    
+                    bindRemoveAccessoryButtons();
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load saved data:', e);
+    }
+}
+
+// Auto-save on input changes
+document.addEventListener('input', function(e) {
+    if (e.target.matches('#deadline, #namaTas, #orderNotes, .color-name, .color-qty, .accessory-name, .accessory-multiplier')) {
+        // Debounce auto-save
+        clearTimeout(window.autoSaveTimeout);
+        window.autoSaveTimeout = setTimeout(autoSave, 1000);
+    }
+});
+
+// Clear saved data when form is cleared
+function clearSavedData() {
+    try {
+        if (typeof(Storage) !== "undefined") {
+            localStorage.removeItem('orderFormData');
+        }
+    } catch (e) {
+        console.warn('Failed to clear saved data:', e);
+    }
+}
+
+// Load saved data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait a bit for the page to fully initialize
+    setTimeout(loadSavedData, 100);
+});
+
+// Export functions for external use
+window.OrderManager = {
+    generatePDF,
+    clearForm,
+    downloadPDF,
+    printPDF,
+    validateForm,
+    getFormData
+};
