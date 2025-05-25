@@ -1,207 +1,606 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Order Tas - PDF Generator</title>
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#1f2937">
-    <meta name="mobile-web-app-capable" content="yes">
-    <!-- <meta name="apple-mobile-web-app-capable" content="yes"> -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Order Tas">
-    <link rel="manifest" href="/manifest.json">
+// Global variables
+let uploadedImage = null;
+let generatedPDF = null;
 
-    <!-- PWA Icons -->
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="apple-touch-icon" href="/icon-192.png">
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    initializeApp();
+});
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+function initializeApp() {
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+            console.log('SW registered: ', registration);
+        })
+        .catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+        });
+    });
+    }
+
+    // PWA Install Prompt (optional)
+    let deferredPrompt;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later
+    deferredPrompt = e;
     
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    // Show install button (if you have one)
+    const installBtn = document.getElementById('install-btn');
+    if (installBtn) {
+        installBtn.style.display = 'block';
+        
+        installBtn.addEventListener('click', () => {
+        // Show the install prompt
+        deferredPrompt.prompt();
+        
+        // Wait for the user to respond to the prompt
+        deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the install prompt');
+            } else {
+            console.log('User dismissed the install prompt');
+            }
+            deferredPrompt = null;
+        });
+        });
+    }
+    });
+
+    // Set default deadline to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    document.getElementById('deadline').value = tomorrow.toISOString().split('T')[0];
+
+    // Bind event listeners
+    bindEvents();
+
+    // Tambahkan di fungsi initializeApp()
+    document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('color-name') && 
+            !e.target.classList.contains('color-qty')) {
+            // Jika klik di luar input warna/jumlah, hilangkan fokus
+            if (document.activeElement.classList.contains('color-name') || 
+                document.activeElement.classList.contains('color-qty')) {
+                document.activeElement.blur();
+            }
+        }
+    });
+
+}
+
+// Jika perlu membersihkan event listener
+function cleanup() {
+    document.removeEventListener('keydown', handleColorInputEnter);
+}
+
+function bindEvents() {
+    // Add color button
+    document.getElementById('addColor').addEventListener('click', addColorRow);
     
-    <!-- jsPDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    // Image upload
+    document.getElementById('imageUpload').addEventListener('change', handleImageUpload);
     
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .color-row { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-        .btn-primary { transition: all 0.2s ease; }
-        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
-        .input-field { transition: all 0.2s ease; }
-        .input-field:focus { transform: translateY(-1px); }
-        @media print { .no-print { display: none !important; } }
-    </style>
-</head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Header -->
-    <header class="bg-white shadow-sm border-b border-gray-200">
-        <div class="max-w-4xl mx-auto px-4 py-4">
-            <div class="flex items-center space-x-3">
-                <div class="bg-gray-800 p-2 rounded-lg">
-                    <i class="fas fa-shopping-bag text-white text-lg"></i>
-                </div>
-                <div>
-                    <h1 class="text-xl font-semibold text-gray-900">Order Management</h1>
-                    <p class="text-sm text-gray-500">Generator PDF untuk orderan tas</p>
-                </div>
-            </div>
+    // PDF buttons
+    document.getElementById('generatePDF').addEventListener('click', generatePDF);
+    document.getElementById('downloadPDF').addEventListener('click', downloadPDF);
+    document.getElementById('printPDF').addEventListener('click', printPDF);
+    
+    // Modal close
+    document.getElementById('closeModal').addEventListener('click', closeModal);
+    
+    // Initial remove color button
+    bindRemoveColorButtons();
+
+    // Add Enter key behavior for color inputs
+    document.addEventListener('keydown', handleColorInputEnter);
+}
+
+// Tambahkan fungsi baru untuk menangani Enter
+function handleColorInputEnter(e) {
+    if (e.key === 'Enter') {
+        const activeElement = document.activeElement;
+        
+        // Jika Enter ditekan di input nama warna
+        if (activeElement.classList.contains('color-name')) {
+            e.preventDefault();
+            const qtyInput = activeElement.closest('.color-row').querySelector('.color-qty');
+            qtyInput.focus();
+        } 
+        // Jika Enter ditekan di input jumlah
+        else if (activeElement.classList.contains('color-qty')) {
+            e.preventDefault();
+            // Cek jika input jumlah memiliki nilai
+            if (activeElement.value) {
+                addColorRow();
+                const newRow = document.querySelector('.color-row:last-child');
+                const newNameInput = newRow.querySelector('.color-name');
+                newNameInput.focus();
+            }
+        }
+    }
+}
+
+
+function addColorRow() {
+    const container = document.getElementById('colorContainer');
+    const colorRow = document.createElement('div');
+    colorRow.className = 'color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg';
+    colorRow.innerHTML = `
+        <div class="flex-1">
+            <input type="text" placeholder="Nama warna" 
+                   class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
         </div>
-    </header>
-
-    <!-- Main Content -->
-    <main class="max-w-4xl mx-auto px-4 py-8">
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <!-- Form Header -->
-            <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
-                <h2 class="text-lg font-medium text-gray-900 flex items-center">
-                    <i class="fas fa-edit text-gray-600 mr-2"></i>
-                    Form Order Baru
-                </h2>
-            </div>
-
-            <!-- Form Content -->
-            <div class="p-6 space-y-6">
-                <!-- Basic Info -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-calendar-alt text-gray-400 mr-1"></i>
-                            Tanggal Deadline
-                        </label>
-                        <input type="date" id="deadline" 
-                               class="input-field w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-tag text-gray-400 mr-1"></i>
-                            Nama Tas
-                        </label>
-                        <input type="text" id="namaTas" placeholder="Masukkan nama tas" 
-                               class="input-field w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent">
-                    </div>
-                </div>
-
-                <!-- Colors Section -->
-                <div>
-                    <div class="flex items-center justify-between mb-4">
-                        <label class="block text-sm font-medium text-gray-700">
-                            <i class="fas fa-palette text-gray-400 mr-1"></i>
-                            Warna & Jumlah
-                        </label>
-                        <button type="button" id="addColor" 
-                                class="btn-primary bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center space-x-2">
-                            <i class="fas fa-plus text-sm"></i>
-                            <span>Tambah Warna</span>
-                        </button>
-                    </div>
-                    <div id="colorContainer" class="space-y-3">
-                        <!-- Initial color row -->
-                        <div class="color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
-                            <div class="flex-1">
-                                <input type="text" placeholder="Nama warna" 
-                                       class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
-                            </div>
-                            <div class="w-32">
-                                <input type="number" placeholder="Jumlah" min="1" 
-                                       class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
-                            </div>
-                            <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Image Upload -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        <i class="fas fa-image text-gray-400 mr-1"></i>
-                        Upload Gambar Tas
-                    </label>
-                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                        <input type="file" id="imageUpload" accept="image/*" class="hidden">
-                        <label for="imageUpload" class="cursor-pointer">
-                            <div class="mb-2">
-                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400"></i>
-                            </div>
-                            <p class="text-gray-600">Klik untuk upload gambar</p>
-                            <p class="text-xs text-gray-500 mt-1">PNG, JPG hingga 10MB</p>
-                        </label>
-                    </div>
-                    <div id="imagePreview" class="mt-4 hidden">
-                        <img id="previewImg" class="max-w-xs mx-auto rounded-lg shadow-md">
-                    </div>
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-200">
-                    <button type="button" id="generatePDF" 
-                            class="btn-primary flex-1 bg-gray-800 text-white py-3 px-6 rounded-lg hover:bg-gray-700 flex items-center justify-center space-x-2">
-                        <i class="fas fa-file-pdf"></i>
-                        <span>Generate PDF</span>
-                    </button>
-                    <!-- <button type="button" id="downloadPDF" 
-                            class="btn-primary flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed" 
-                            disabled>
-                        <i class="fas fa-download"></i>
-                        <span>Download PDF</span>
-                    </button> -->
-                </div>
-            </div>
+        <div class="w-32">
+            <input type="number" placeholder="Jumlah" min="1" 
+                   class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
         </div>
+        <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    container.appendChild(colorRow);
+    bindRemoveColorButtons();
+    
+    // Fokus ke input nama warna di row baru
+    const nameInput = colorRow.querySelector('.color-name');
+    nameInput.focus();
+}
 
-        <!-- PDF Preview -->
-        <div id="pdfPreview" class="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
-            <div class="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                <h3 class="text-lg font-medium text-gray-900 flex items-center">
-                    <i class="fas fa-eye text-gray-600 mr-2"></i>
-                    Preview PDF
-                </h3>
-                <div class="flex space-x-2">
-                    <button id="printPDF" disabled 
-                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center">
-                        <i class="fas fa-print mr-2"></i>
-                        Print
-                    </button>
-                    <button id="downloadPDF" disabled 
-                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center">
-                        <i class="fas fa-download mr-2"></i>
-                        Download
-                    </button>
-                </div>
-            </div>
-            <div class="p-6">
-                <div id="pdfContent" class="bg-white border border-gray-200 rounded-lg p-8 max-w-2xl mx-auto">
-                    <!-- PDF content will be inserted here -->
-                </div>
-            </div>
-        </div>
-    </main>
+function bindRemoveColorButtons() {
+    document.querySelectorAll('.remove-color').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (document.querySelectorAll('.color-row').length > 1) {
+                this.closest('.color-row').remove();
+            } else {
+                alert('Minimal harus ada 1 warna');
+            }
+        });
+    });
+}
 
-    <!-- Success Modal -->
-    <div id="successModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-        <div class="bg-white rounded-xl p-6 max-w-sm mx-4">
-            <div class="text-center">
+function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (file) {
+        if (file.size > 10 * 1024 * 1024) {
+            alert('File terlalu besar. Maksimal 10MB');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            // Process image to fix orientation and create thumbnail
+            processImageForPDF(e.target.result);
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function processImageForPDF(imageSrc) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = function() {
+        // Set canvas size to square thumbnail
+        const size = 300; // Higher resolution for better quality
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Calculate dimensions to fit image in square while maintaining aspect ratio
+        let sourceX = 0, sourceY = 0, sourceWidth = img.width, sourceHeight = img.height;
+        
+        if (img.width > img.height) {
+            // Landscape - crop from center horizontally
+            sourceX = (img.width - img.height) / 2;
+            sourceWidth = img.height;
+        } else if (img.height > img.width) {
+            // Portrait - crop from center vertically
+            sourceY = (img.height - img.width) / 2;
+            sourceHeight = img.width;
+        }
+        
+        // Fill with white background first
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        
+        // Draw image centered and cropped to square
+        ctx.drawImage(
+            img,
+            sourceX, sourceY, sourceWidth, sourceHeight, // source
+            0, 0, size, size // destination
+        );
+        
+        // Convert back to data URL with high quality
+        uploadedImage = canvas.toDataURL('image/jpeg', 0.9);
+        
+        // Update preview
+        document.getElementById('imagePreview').classList.remove('hidden');
+        document.getElementById('previewImg').src = uploadedImage;
+    };
+    
+    img.onerror = function() {
+        alert('Gagal memproses gambar. Silakan coba gambar lain.');
+    };
+    
+    img.src = imageSrc;
+}
+
+function validateForm() {
+    const deadline = document.getElementById('deadline').value;
+    const namaTas = document.getElementById('namaTas').value.trim();
+    const colorRows = document.querySelectorAll('.color-row');
+    
+    if (!deadline) {
+        alert('Tanggal deadline harus diisi');
+        return false;
+    }
+    
+    if (!namaTas) {
+        alert('Nama tas harus diisi');
+        return false;
+    }
+    
+    let hasValidColor = false;
+    colorRows.forEach(row => {
+        const colorName = row.querySelector('.color-name').value.trim();
+        const colorQty = row.querySelector('.color-qty').value;
+        if (colorName && colorQty && parseInt(colorQty) > 0) {
+            hasValidColor = true;
+        }
+    });
+    
+    if (!hasValidColor) {
+        alert('Minimal harus ada 1 warna dengan jumlah yang valid');
+        return false;
+    }
+    
+    return true;
+}
+
+function getFormData() {
+    const deadline = document.getElementById('deadline').value;
+    const namaTas = document.getElementById('namaTas').value.trim();
+    const colorRows = document.querySelectorAll('.color-row');
+    
+    const colors = [];
+    let totalQty = 0;
+    
+    colorRows.forEach(row => {
+        const colorName = row.querySelector('.color-name').value.trim();
+        const colorQty = parseInt(row.querySelector('.color-qty').value) || 0;
+        
+        if (colorName && colorQty > 0) {
+            colors.push({ name: colorName, qty: colorQty });
+            totalQty += colorQty;
+        }
+    });
+    
+    return {
+        deadline: new Date(deadline).toLocaleDateString('id-ID', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        }),
+        namaTas: namaTas,
+        colors: colors,
+        totalQty: totalQty,
+        image: uploadedImage
+    };
+}
+
+function generatePDFPreview(data) {
+    const previewContent = document.getElementById('pdfContent');
+    let colorsHTML = '';
+    
+    data.colors.forEach(color => {
+        colorsHTML += `
+            <div class="flex justify-between items-center py-2 border-b border-gray-100">
+                <span class="text-gray-700">${color.name}</span>
+                <span class="font-medium">${color.qty} pcs</span>
+            </div>
+        `;
+    });
+    
+    // Create thumbnail layout for preview
+    const orderInfoHTML = data.image ? 
+        `<div class="flex items-start gap-6 mb-6">
+            <div class="flex-1">
                 <div class="mb-4">
-                    <i class="fas fa-check-circle text-green-500 text-4xl"></i>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Nama Produk</h3>
+                    <p class="text-lg font-semibold text-gray-900">${data.namaTas}</p>
                 </div>
-                <h3 class="text-lg font-semibold text-gray-900 mb-2">PDF Berhasil Dibuat!</h3>
-                <p class="text-gray-600 mb-4">PDF orderan siap untuk di print dan didownload</p>
-                <button type="button" id="closeModal" 
-                        class="w-full bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700">
-                    Tutup
-                </button>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Deadline</h3>
+                    <p class="text-lg font-semibold text-gray-900">${data.deadline}</p>
+                </div>
+            </div>
+            <div class="flex-shrink-0">
+                <img src="${data.image}" alt="Gambar Tas" class="w-20 h-20 object-cover rounded-lg border border-gray-200 shadow-sm">
+            </div>
+        </div>` : 
+        `<div class="grid grid-cols-2 gap-6 mb-6">
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Nama Produk</h3>
+                <p class="text-lg font-semibold text-gray-900">${data.namaTas}</p>
+            </div>
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Deadline</h3>
+                <p class="text-lg font-semibold text-gray-900">${data.deadline}</p>
+            </div>
+        </div>`;
+    
+    previewContent.innerHTML = `
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">ORDER CONFIRMATION</h1>
+            <div class="w-16 h-1 bg-gray-800 mx-auto"></div>
+        </div>
+        
+        <!-- Order Info with Thumbnail -->
+        <div class="mb-8">
+            ${orderInfoHTML}
+        </div>
+        
+        <!-- Colors Table -->
+        <div class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Warna & Jumlah</h3>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <div class="space-y-1">
+                    ${colorsHTML}
+                </div>
             </div>
         </div>
-    </div>
+        
+        <!-- Total -->
+        <div class="mt-8 pt-6 border-t-2 border-gray-800">
+            <div class="flex justify-between items-center">
+                <span class="text-xl font-semibold text-gray-900">Total Tas:</span>
+                <span class="text-2xl font-bold text-gray-900">${data.totalQty} pcs</span>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="mt-8 pt-6 border-t border-gray-200 text-center">
+            <p class="text-sm text-gray-500">Generated on ${new Date().toLocaleDateString('id-ID')}</p>
+        </div>
+    `;
+    
+    document.getElementById('pdfPreview').classList.remove('hidden');
+    document.getElementById('pdfPreview').scrollIntoView({ behavior: 'smooth' });
+}
 
-    <!-- JavaScript -->
-    <script src="app.js"></script>
-</body>
-</html>
+async function generatePDF() {
+    if (!validateForm()) return;
+    
+    const data = getFormData();
+    generatePDFPreview(data);
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF();
+        
+        // Set font
+        pdf.setFont('helvetica');
+        
+        let yPosition = 30;
+        
+        // Header
+        pdf.setFontSize(20);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('ORDER CONFIRMATION', 105, yPosition, { align: 'center' });
+        
+        // Line under header
+        pdf.setLineWidth(2);
+        pdf.line(20, yPosition + 5, 190, yPosition + 5);
+        
+        yPosition += 25;
+        
+        // Order Info with thumbnail image
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'bold');
+        
+        // Add thumbnail image first if exists (positioned on the right)
+        let thumbnailAdded = false;
+        if (data.image) {
+            try {
+                const thumbnailSize = 30; // Slightly smaller for better fit
+                const thumbnailX = 155; // Adjusted position
+                const thumbnailY = yPosition - 2;
+                
+                // Add image with proper format specification
+                pdf.addImage(data.image, 'JPEG', thumbnailX, thumbnailY, thumbnailSize, thumbnailSize);
+                thumbnailAdded = true;
+            } catch (error) {
+                console.warn('Could not add thumbnail to PDF:', error);
+            }
+        }
+        
+        // Product info (left side)
+        pdf.text('NAMA PRODUK:', 20, yPosition);
+        pdf.setFont('helvetica', 'normal');
+        // Limit text width if thumbnail is present
+        const maxTextWidth = thumbnailAdded ? 120 : 170;
+        const splitNama = pdf.splitTextToSize(data.namaTas, maxTextWidth - 50);
+        pdf.text(splitNama, 70, yPosition);
+        
+        // Adjust yPosition based on text height
+        const textHeight = splitNama.length * 5;
+        yPosition += Math.max(10, textHeight);
+        
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('DEADLINE:', 20, yPosition);
+        pdf.setFont('helvetica', 'normal');
+        const splitDeadline = pdf.splitTextToSize(data.deadline, maxTextWidth - 50);
+        pdf.text(splitDeadline, 70, yPosition);
+        
+        // Ensure we move past the thumbnail area
+        if (thumbnailAdded) {
+            yPosition = Math.max(yPosition + 10, yPosition - 15 + 35 + 10);
+        } else {
+            yPosition += 15;
+        }
+        
+        yPosition += 10;
+        
+        // Colors section
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('DETAIL WARNA & JUMLAH:', 20, yPosition);
+        yPosition += 10;
+        
+        pdf.setFont('helvetica', 'normal');
+        data.colors.forEach(color => {
+            pdf.text(`• ${color.name}`, 25, yPosition);
+            pdf.text(`${color.qty} pcs`, 150, yPosition);
+            yPosition += 8;
+        });
+        
+        yPosition += 15;
+        
+        // Total
+        pdf.setLineWidth(1);
+        pdf.line(20, yPosition, 190, yPosition);
+        yPosition += 15;
+        
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('TOTAL TAS:', 20, yPosition);
+        pdf.text(`${data.totalQty} pcs`, 150, yPosition);
+        
+        // Footer
+        yPosition += 20;
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(`Generated on ${new Date().toLocaleDateString('id-ID')}`, 105, yPosition, { align: 'center' });
+        
+        generatedPDF = pdf;
+        
+        // Enable download and print buttons
+        document.getElementById('downloadPDF').disabled = false;
+        document.getElementById('printPDF').disabled = false;
+        
+        // Show success modal
+        showSuccessModal();
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('Terjadi kesalahan saat membuat PDF. Silakan coba lagi.');
+    }
+}
+
+function downloadPDF() {
+    if (generatedPDF) {
+        const namaTas = document.getElementById('namaTas').value.trim() || 'Order';
+        const fileName = `Order_${namaTas.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`;
+        generatedPDF.save(fileName);
+    }
+}
+
+function printPDF() {
+    if (generatedPDF) {
+        // Create a blob from the PDF
+        const pdfBlob = generatedPDF.output('blob');
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        
+        // Open in new window for printing
+        const printWindow = window.open(blobUrl);
+        
+        // Wait for PDF to load, then trigger print dialog
+        printWindow.onload = function() {
+            setTimeout(() => {
+                printWindow.print();
+                // Clean up the blob URL after printing
+                setTimeout(() => {
+                    URL.revokeObjectURL(blobUrl);
+                }, 1000);
+            }, 500);
+        };
+    }
+}
+
+function showSuccessModal() {
+    document.getElementById('successModal').classList.remove('hidden');
+    document.getElementById('successModal').classList.add('flex');
+}
+
+function closeModal() {
+    document.getElementById('successModal').classList.add('hidden');
+    document.getElementById('successModal').classList.remove('flex');
+}
+
+// Utility functions
+function formatNumber(num) {
+    return new Intl.NumberFormat('id-ID').format(num);
+}
+
+function validateImageFile(file) {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+    return allowedTypes.includes(file.type);
+}
+
+// PWA Install prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    // Ctrl + Enter to generate PDF
+    if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        generatePDF();
+    }
+    
+    // Ctrl + D to download PDF
+    if (e.ctrlKey && e.key === 'd' && !document.getElementById('downloadPDF').disabled) {
+        e.preventDefault();
+        downloadPDF();
+    }
+    
+    // Ctrl + P to print PDF
+    if (e.ctrlKey && e.key === 'p' && !document.getElementById('printPDF').disabled) {
+        e.preventDefault();
+        printPDF();
+    }
+});
+
+// Auto-save form data to prevent data loss
+function autoSaveFormData() {
+    const formData = {
+        deadline: document.getElementById('deadline').value,
+        namaTas: document.getElementById('namaTas').value,
+        colors: []
+    };
+    
+    document.querySelectorAll('.color-row').forEach(row => {
+        const colorName = row.querySelector('.color-name').value;
+        const colorQty = row.querySelector('.color-qty').value;
+        if (colorName || colorQty) {
+            formData.colors.push({ name: colorName, qty: colorQty });
+        }
+    });
+    
+    // Store in memory only (no localStorage for Claude.ai)
+    window.tempFormData = formData;
+}
+
+// Auto-save every 30 seconds
+setInterval(autoSaveFormData, 30000);
+
+// Form change detection
+document.addEventListener('input', () => {
+    // Reset download and print buttons when form changes
+    document.getElementById('downloadPDF').disabled = true;
+    document.getElementById('printPDF').disabled = true;
+    generatedPDF = null;
+});
+
+console.log('Order Tas App initialized successfully!');
