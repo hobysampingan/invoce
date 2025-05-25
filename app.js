@@ -91,6 +91,9 @@ function bindEvents() {
     document.getElementById('downloadPDF').addEventListener('click', downloadPDF);
     document.getElementById('printPDF').addEventListener('click', printPDF);
     
+    // Clear form button
+    document.getElementById('clearForm').addEventListener('click', clearForm);
+    
     // Modal close
     document.getElementById('closeModal').addEventListener('click', closeModal);
     
@@ -125,7 +128,6 @@ function handleColorInputEnter(e) {
         }
     }
 }
-
 
 function addColorRow() {
     const container = document.getElementById('colorContainer');
@@ -266,6 +268,7 @@ function validateForm() {
 function getFormData() {
     const deadline = document.getElementById('deadline').value;
     const namaTas = document.getElementById('namaTas').value.trim();
+    const orderNotes = document.getElementById('orderNotes').value.trim();
     const colorRows = document.querySelectorAll('.color-row');
     
     const colors = [];
@@ -291,7 +294,8 @@ function getFormData() {
         namaTas: namaTas,
         colors: colors,
         totalQty: totalQty,
-        image: uploadedImage
+        image: uploadedImage,
+        notes: orderNotes
     };
 }
 
@@ -336,6 +340,15 @@ function generatePDFPreview(data) {
             </div>
         </div>`;
     
+    // Add notes section HTML
+    const notesHTML = data.notes ? 
+        `<div class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Catatan</h3>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p class="text-gray-700 whitespace-pre-line">${data.notes}</p>
+            </div>
+        </div>` : '';
+    
     previewContent.innerHTML = `
         <!-- Header -->
         <div class="text-center mb-8">
@@ -357,6 +370,9 @@ function generatePDFPreview(data) {
                 </div>
             </div>
         </div>
+        
+        <!-- Notes Section -->
+        ${notesHTML}
         
         <!-- Total -->
         <div class="mt-8 pt-6 border-t-2 border-gray-800">
@@ -454,14 +470,58 @@ async function generatePDF() {
         pdf.text('DETAIL WARNA & JUMLAH:', 20, yPosition);
         yPosition += 10;
         
-        pdf.setFont('helvetica', 'normal');
-        data.colors.forEach(color => {
-            pdf.text(`• ${color.name}`, 25, yPosition);
-            pdf.text(`${color.qty} pcs`, 150, yPosition);
-            yPosition += 8;
+       
+
+        // Tentukan posisi kolom
+        const leftColumnX = 25;
+        const rightColumnX = 110;
+        const centerLineX = 95;
+        const itemsPerColumn = Math.ceil(data.colors.length / 2);
+
+        // Gambar garis vertikal di tengah
+        pdf.setDrawColor(0, 0, 0);
+        pdf.setLineWidth(0.5);
+        pdf.line(centerLineX, yPosition - 5, centerLineX, yPosition + (itemsPerColumn * 8) + 5);
+
+        // Reset posisi Y untuk kedua kolom
+        let leftYPosition = yPosition;
+        let rightYPosition = yPosition;
+
+        data.colors.forEach((color, index) => {
+            if (index < itemsPerColumn) {
+                // Kolom kiri
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(`• ${color.name}`, leftColumnX, leftYPosition);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(`${color.qty} pcs`, leftColumnX + 50, leftYPosition);
+                leftYPosition += 8;
+            } else {
+                // Kolom kanan
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(`• ${color.name}`, rightColumnX, rightYPosition);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(`${color.qty} pcs`, rightColumnX + 50, rightYPosition);
+                rightYPosition += 8;
+            }
         });
+
+        // Update yPosition untuk konten selanjutnya
+yPosition = Math.max(leftYPosition, rightYPosition) + 10;
         
-        yPosition += 15;
+        // Add notes section if exists
+        if (data.notes) {
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('CATATAN:', 20, yPosition);
+            yPosition += 10;
+            
+            pdf.setFont('helvetica', 'normal');
+            // Split notes text to fit within page width
+            const splitNotes = pdf.splitTextToSize(data.notes, 170);
+            pdf.text(splitNotes, 20, yPosition);
+            yPosition += splitNotes.length * 5 + 10;
+        }
+        
+        yPosition += 5;
         
         // Total
         pdf.setLineWidth(1);
@@ -491,6 +551,63 @@ async function generatePDF() {
     } catch (error) {
         console.error('Error generating PDF:', error);
         alert('Terjadi kesalahan saat membuat PDF. Silakan coba lagi.');
+    }
+}
+
+function clearForm() {
+    // Konfirmasi sebelum clear
+    if (confirm('Apakah Anda yakin ingin menghapus semua data dan memulai dari awal?')) {
+        // Reset form fields
+        document.getElementById('deadline').value = '';
+        document.getElementById('namaTas').value = '';
+        document.getElementById('orderNotes').value = '';
+        
+        // Set default deadline to tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        document.getElementById('deadline').value = tomorrow.toISOString().split('T')[0];
+        
+        // Reset image
+        document.getElementById('imageUpload').value = '';
+        document.getElementById('imagePreview').classList.add('hidden');
+        uploadedImage = null;
+        
+        // Reset color rows - keep only one empty row
+        const colorContainer = document.getElementById('colorContainer');
+        colorContainer.innerHTML = `
+            <div class="color-row flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
+                <div class="flex-1">
+                    <input type="text" placeholder="Nama warna" 
+                           class="color-name w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                </div>
+                <div class="w-32">
+                    <input type="number" placeholder="Jumlah" min="1" 
+                           class="color-qty w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+                </div>
+                <button type="button" class="remove-color text-red-500 hover:text-red-700 p-2">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        // Re-bind remove color buttons
+        bindRemoveColorButtons();
+        
+        // Hide PDF preview
+        document.getElementById('pdfPreview').classList.add('hidden');
+        
+        // Reset PDF buttons
+        document.getElementById('downloadPDF').disabled = true;
+        document.getElementById('printPDF').disabled = true;
+        generatedPDF = null;
+        
+        // Clear temp data
+        window.tempFormData = null;
+        
+        // Focus on nama tas field
+        document.getElementById('namaTas').focus();
+        
+        console.log('Form cleared successfully!');
     }
 }
 
@@ -577,6 +694,7 @@ function autoSaveFormData() {
     const formData = {
         deadline: document.getElementById('deadline').value,
         namaTas: document.getElementById('namaTas').value,
+        orderNotes: document.getElementById('orderNotes').value,
         colors: []
     };
     
